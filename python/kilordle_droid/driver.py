@@ -10,7 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.color import Color
 from selenium.webdriver.support.wait import WebDriverWait
 
-from kilordle_droid.util import is_five_lowercase_letters
+from .util import is_five_lowercase_letters
 
 DriverOrElement = Union[WebDriver, WebElement]
 
