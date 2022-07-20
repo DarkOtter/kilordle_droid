@@ -2,9 +2,9 @@ use std::env;
 use std::path::Path;
 use std::io::{BufRead, Read, Write};
 
-const WORD_LEN: usize = 5;
+const WORD_LENGTH: usize = 5;
 
-fn read_words(from_path: impl AsRef<Path>) -> std::io::Result<Vec<[u8; WORD_LEN]>> {
+fn read_words(from_path: impl AsRef<Path>) -> std::io::Result<Vec<[u8; WORD_LENGTH]>> {
     let read_f = std::fs::File::open(from_path)?;
     let mut read_f = std::io::BufReader::new(read_f);
     let mut buf = Vec::with_capacity(16);
@@ -12,8 +12,9 @@ fn read_words(from_path: impl AsRef<Path>) -> std::io::Result<Vec<[u8; WORD_LEN]
     loop {
         let read_size = read_f.read_until(b'\n', &mut buf)?;
         if read_size == 0 { break Ok(res) }
-        if read_size != (WORD_LEN + 1) { panic!("Line of the wrong size!") }
-        res.push(buf[..WORD_LEN].try_into().unwrap())
+        if read_size != (WORD_LENGTH + 1) { panic!("Line of the wrong size!") }
+        res.push(buf[..WORD_LENGTH].try_into().unwrap());
+        buf.clear();
     }
 }
 
@@ -23,7 +24,7 @@ fn common_prefix_length<T: Eq>(left: &[T], right: &[T]) -> usize {
     }).count()
 }
 
-fn write_words(dest_path: impl AsRef<Path>, words: &[[u8;WORD_LEN]]) -> std::io::Result<()> {
+fn write_words(dest_path: impl AsRef<Path>, words: &[[u8; WORD_LENGTH]]) -> std::io::Result<()> {
     let mut write_f = std::fs::File::create(dest_path)?;
     const BLOCK_SIZE: usize = 64;
     const WRITE_SIZE: usize = 4 * 1024;
@@ -43,7 +44,7 @@ fn write_words(dest_path: impl AsRef<Path>, words: &[[u8;WORD_LEN]]) -> std::io:
             };
 
             let prefix_len = common_prefix_length(prev_word.as_slice(), next_word.as_slice());
-            if buf.len() + 2 + (WORD_LEN - prefix_len) > block_end {
+            if buf.len() + 2 + (WORD_LENGTH - prefix_len) > block_end {
                 break;
             }
             let word = words.next().expect("Already peeked");
@@ -53,7 +54,7 @@ fn write_words(dest_path: impl AsRef<Path>, words: &[[u8;WORD_LEN]]) -> std::io:
         }
         buf.push(0xff);
         while buf.len() < block_end {
-            buf.push(0x00);
+            buf.push(b' ');
         }
 
         if buf.len() >= WRITE_SIZE {

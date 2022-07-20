@@ -6,6 +6,7 @@ use std::ops::Deref;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use word::{Word, WORD_LENGTH};
+use rayon::prelude::*;
 
 
 // TODO: Reduce visibility
@@ -24,7 +25,7 @@ fn add_scores(a: u8, b:u8) -> u8 {
     a.wrapping_add(b)
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 struct ScoringState {
     word: Word,
     score_at_position: [u8; WORD_LENGTH],
@@ -36,10 +37,9 @@ impl ScoringState {
     }
 
     fn add_history_item(&mut self, guess: Word) {
-        let ScoringState { word, score_at_position } = self;
-        let word = *word;
+        let word = self.word.bytes();
         let guess = guess.bytes();
-        score_at_position.iter_mut().zip(word.bytes().iter()).enumerate().for_each(|(i, (score_at_position, &word_letter))| {
+        self.score_at_position.iter_mut().zip(word.iter()).enumerate().for_each(|(i, (score_at_position, &word_letter))| {
             if word_letter == guess[i] {
                 *score_at_position = 3
             } else if guess.iter().any(|&guess_letter| guess_letter == word_letter) && *score_at_position < 1 {
@@ -122,7 +122,7 @@ impl GuessResult {
 }
 
 
-fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[impl Deref<Target = [GuessResult]>], n_remaining_words: usize) -> Result<Word, PyErr> {
+fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[Vec<GuessResult>], n_remaining_words: usize) -> Result<Word, PyErr> {
     struct InfoForHistory<'a> {
         result_history: &'a [GuessResult],
         possible_words: Vec<ScoringState>
@@ -137,24 +137,28 @@ fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[impl Deref<T
         return Err(PyValueError::new_err("Length of histories are different"))
     }
 
-    let mut possible_visible_words: Vec<_> =
-        visible_results.iter().map(|x| InfoForHistory { result_history: x.deref(), possible_words: Vec::new() }).collect();
-    let mut possible_invisible_words = Vec::new();
-    dict::wordles()
-        .map(|word| {
-            let mut state = ScoringState::for_word(word);
-            state.add_history_items(guess_history);
-            state
-        })
-        .filter(|word| word.current_score() < MAX_SCORE)
-        .for_each(|word| {
-            possible_invisible_words.push(word);
-            possible_visible_words.iter_mut().for_each(|visible_word| {
-                if GuessResult::history_is_possible(guess_history, visible_word.result_history, word.word) {
-                    visible_word.possible_words.push(word)
-                }
-            });
-        });
+    let mut possible_invisible_words: Vec<_> =
+        dict::wordles()
+            .into_par_iter()
+            .map(|word| {
+                let mut state = ScoringState::for_word(word);
+                state.add_history_items(guess_history);
+                state
+            })
+            .filter(|word| word.current_score() < MAX_SCORE)
+            .collect();
+
+    let possible_visible_words: Vec<_> =
+        visible_results.par_iter().map(|x| {
+            let result_history: &[GuessResult] = x.deref();
+            let possible_words: Vec<_> = {
+                possible_invisible_words.par_iter()
+                    .cloned()
+                    .filter(|state| GuessResult::history_is_possible(guess_history, result_history, state.word))
+                    .collect()
+            };
+            InfoForHistory { result_history, possible_words }
+        }).collect();
 
     if let Some(maximum_invisible_score) = possible_visible_words.iter().map(|visible_word| visible_word.possible_words.iter().map(|word| word.current_score()).max().unwrap_or(MAX_SCORE)).min() {
         possible_invisible_words.retain(|word| word.current_score() <= maximum_invisible_score);
@@ -165,7 +169,7 @@ fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[impl Deref<T
 
     fn average_score(possible_words: &Vec<ScoringState>, extra_guess: Word) -> f64 {
         let total_score_increase =
-            possible_words.iter().map(|state| {
+            possible_words.par_iter().map(|state| {
                 let mut state = state.clone();
                 state.add_history_item(extra_guess);
                 state.current_score() as u64
@@ -173,20 +177,17 @@ fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[impl Deref<T
         (total_score_increase as f64) / (possible_words.len() as f64)
     }
 
-    let mut res: Option<(Word, f64)> = None;
-    dict::wordles().chain(dict::other_words()).for_each(|guess| {
-        let visible_score_increase =
-            possible_visible_words.iter().map(|visible_word| {
-                average_score(&visible_word.possible_words, guess)
-            }).sum::<f64>();
-        let invisible_score_increase =
-            average_score(&possible_invisible_words, guess)
-                * n_invisible_words as f64;
-        let score_increase = visible_score_increase + invisible_score_increase;
-        if res.map_or(true, |res|  score_increase > res.1) {
-            res = Some((guess, score_increase))
-        }
-    });
+    let res =
+        dict::wordles().into_par_iter().chain(dict::other_words().into_par_iter()).map(|guess| {
+            let visible_score =
+                possible_visible_words.iter().map(|visible_word| {
+                    average_score(&visible_word.possible_words, guess)
+                }).sum::<f64>();
+            let invisible_score =
+                average_score(&possible_invisible_words, guess);
+            let score = visible_score + invisible_score;
+            (guess, score)
+        }).reduce_with(|l, r| if r.1 > l.1 { r } else { l });
 
     res.map(|word| word.0).ok_or_else(|| {
         pyo3::exceptions::PyRuntimeError::new_err("Failed to find any words to be possible guesses")
@@ -293,9 +294,45 @@ mod tests {
     }
 
     // #[test]
-    // fn test_pick_next_guess_example() {
+    // fn test_pick_next_guess_start() {
     //     let visible_results: &[Vec<GuessResult>] = &[];
     //     assert_eq!(pick_next_guess_inner(&[], visible_results, 1000).unwrap(), word("cigar"))
+    // }
+    //
+    // #[test]
+    // fn test_pick_next_guess_after_cigar() {
+    //     let visible_results: &[Vec<GuessResult>] = &[
+    //         vec![result("oO OO")],
+    //         vec![result("OO oo")],
+    //         vec![result("OO   ")],
+    //         vec![result("O  O ")],
+    //         vec![result(" o OO")],
+    //         vec![result("O  Oo")],
+    //         vec![result("   OO")],
+    //         vec![result("  O O")],
+    //         vec![result(" OO  ")],
+    //         vec![result(" O Oo")],
+    //         vec![result(" O  O")],
+    //         vec![result("  OoO")],
+    //         vec![result("O   O")],
+    //         vec![result("  OOo")],
+    //         vec![result("   OO")],
+    //         vec![result(" OOo ")],
+    //         vec![result("O  Oo")],
+    //         vec![result("O  Oo")],
+    //         vec![result("O  oO")],
+    //         vec![result("O   O")],
+    //         vec![result(" O O ")],
+    //         vec![result(" O O ")],
+    //         vec![result("   OO")],
+    //         vec![result(" OO  ")],
+    //         vec![result("O   O")],
+    //         vec![result("O   O")],
+    //         vec![result("   OO")],
+    //         vec![result(" O  O")],
+    //         vec![result(" O  O")],
+    //     ];
+    //     assert_eq!(pick_next_guess_inner(&[word("cigar")], visible_results, 1000).unwrap(), word("cigar"))
     // }
 }
 
