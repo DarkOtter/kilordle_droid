@@ -1,3 +1,4 @@
+import importlib.resources
 import re
 import time
 from typing import Union, List, Literal, Tuple
@@ -10,7 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.color import Color
 from selenium.webdriver.support.wait import WebDriverWait
 
-from .util import is_five_lowercase_letters
+from ..util import is_five_lowercase_letters
 
 DriverOrElement = Union[WebDriver, WebElement]
 
@@ -63,6 +64,14 @@ def _rows_of_result_history(elem: WebElement) -> List[WebElement]:
     return all_rows
 
 
+_read_results_div_script = "return " + importlib.resources.read_text('kilordle_droid.driver', 'read_results.js', encoding='utf8')
+
+
+def _read_results_div(driver: WebDriver, results_elem: WebElement):
+    return driver.execute_script(_read_results_div_script, results_elem)
+
+
+
 class KilordleController:
     _webdriver: WebDriver
     _body_elem: WebElement
@@ -90,45 +99,11 @@ class KilordleController:
         return int(self._remaining_rex.search(self._navbar_elem.text).group(1))
 
     def read_result_history(self) -> Tuple[List[str], List[List[str]]]:
-        result_elems = [
-            elem for elem in _child_divs(self._results_elem)
-            if '+' not in elem.text and len(_child_divs(elem)) >= 1]
-        if len(result_elems) < 1:
+        by_column = _read_results_div(self._webdriver, self._results_elem)
+        if len(by_column) == 0:
             return [], []
-
-        guess_history = []
-        for row_elem in _rows_of_result_history(result_elems[0]):
-            guess = _remove_all_whitespace(row_elem.text)
-            if not is_five_lowercase_letters(guess):
-                raise RuntimeError("Result history has invalid guess: {}".format(repr(guess)))
-            guess_history.append(guess)
-
-        result_histories = []
-        for result_elem in result_elems:
-            result_history = []
-            for i, row_elem in enumerate(_rows_of_result_history(result_elem)):
-                guess = ''
-                result = ''
-                for letter_elem in row_elem.find_elements(By.XPATH, './div'):
-                    letter = letter_elem.text.strip()
-                    if not ('a' <= letter <= 'z'):
-                        raise RuntimeError('Expected every guess result row letter to have a letter as its text')
-                    guess += letter
-                    elem_colour = Color.from_string(letter_elem.value_of_css_property('background-color'))
-                    if elem_colour.green < 50:
-                        raise RuntimeError('Unexpected colour of letter element')
-                    elif elem_colour.red < 50:
-                        result += 'O'  # Full match
-                    elif elem_colour.blue < 50:
-                        result += 'o'  # Elsewhere match
-                    else:
-                        result += ' '
-                if not is_five_lowercase_letters(guess):
-                    raise RuntimeError('Expected every guess result row to have 5 lowercase letters')
-                elif guess_history[i] != guess:
-                    raise RuntimeError('Saw a result with a guess mistmatch')
-                result_history.append(result)
-            if len(result_history) >= 1:
-                result_histories.append(result_history)
-
+        guess_history = by_column[0]['guessHistory']
+        if any(it['guessHistory'] != guess_history for it in by_column):
+            raise RuntimeError("Mismatch in guess histories")
+        result_histories = [it['resultHistory'] for it in by_column]
         return guess_history, result_histories

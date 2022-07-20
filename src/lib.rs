@@ -132,6 +132,12 @@ fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[Vec<GuessRes
         Some(x) => x,
         None => return Err(PyValueError::new_err("Number of remaining words is insufficient")),
     };
+    let invisible_words_bonus = if n_invisible_words >= 5 {
+        let n = n_invisible_words as f64;
+        n / n.log(5.0)
+    } else {
+        n_invisible_words as f64
+    } ;
 
     if visible_results.iter().any(|x| x.len() != guess_history.len()) {
         return Err(PyValueError::new_err("Length of histories are different"))
@@ -168,13 +174,13 @@ fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[Vec<GuessRes
     let possible_invisible_words = possible_invisible_words;
 
     fn average_score(possible_words: &Vec<ScoringState>, extra_guess: Word) -> f64 {
-        let total_score_increase =
+        let total_score =
             possible_words.par_iter().map(|state| {
                 let mut state = state.clone();
                 state.add_history_item(extra_guess);
                 state.current_score() as u64
             }).sum::<u64>();
-        (total_score_increase as f64) / (possible_words.len() as f64)
+        (total_score as f64) / (possible_words.len() as f64)
     }
 
     let res =
@@ -185,7 +191,7 @@ fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[Vec<GuessRes
                 }).sum::<f64>();
             let invisible_score =
                 average_score(&possible_invisible_words, guess);
-            let score = visible_score + invisible_score;
+            let score = visible_score + invisible_score * invisible_words_bonus;
             (guess, score)
         }).reduce_with(|l, r| if r.1 > l.1 { r } else { l });
 

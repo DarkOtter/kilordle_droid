@@ -11,6 +11,10 @@ last_enter = time.time()
 time_between_guesses = 0.25
 i = 0
 while True:
+    time.sleep(0.01)
+    words_remaining = controller.remaining_words()
+    if words_remaining == 0:
+        break
     time_before_read = time.time()
     guess_history, result_histories = controller.read_result_history()
     time_before_find_guess = time.time()
@@ -23,11 +27,10 @@ while True:
         time.sleep(next_enter - time_after_find_guess)
     else:
         last_enter = time_after_find_guess
-    if i >= 30:
-        input('Waiting before entering guess...')
-        print('Continuing')
     controller.enter_guess(next_guess)
     i += 1
 
-
+input('Waiting before closing...')
+webdriver.quit()
+exit(0)
 
