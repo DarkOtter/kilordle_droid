@@ -1,7 +1,3 @@
-#[cfg(test)]
-#[macro_use]
-extern crate lazy_static;
-
 use std::ops::Deref;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -9,21 +5,10 @@ use word::{Word, WORD_LENGTH};
 use rayon::prelude::*;
 
 
-// TODO: Reduce visibility
-pub mod word;
-pub mod dict;
-
-type GuessHistory = Vec<Word>;
+mod word;
+mod dict;
 
 const MAX_SCORE: u8 = 3 * (WORD_LENGTH as u8);
-
-fn add_scores(a: u8, b:u8) -> u8 {
-    if cfg!(debug) {
-        if a > MAX_SCORE || b > MAX_SCORE { panic!("Score value out of range") }
-        if b > (MAX_SCORE - a) { panic!("Score addition overflow") }
-    }
-    a.wrapping_add(b)
-}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct ScoringState {
@@ -123,11 +108,6 @@ impl GuessResult {
 
 
 fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[Vec<GuessResult>], n_remaining_words: usize) -> Result<Word, PyErr> {
-    struct InfoForHistory<'a> {
-        result_history: &'a [GuessResult],
-        possible_words: Vec<ScoringState>
-    }
-
     let n_invisible_words = match n_remaining_words.checked_sub(visible_results.len()) {
         Some(x) => x,
         None => return Err(PyValueError::new_err("Number of remaining words is insufficient")),
@@ -163,10 +143,10 @@ fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[Vec<GuessRes
                     .filter(|state| GuessResult::history_is_possible(guess_history, result_history, state.word))
                     .collect()
             };
-            InfoForHistory { result_history, possible_words }
+            possible_words
         }).collect();
 
-    if let Some(maximum_invisible_score) = possible_visible_words.iter().map(|visible_word| visible_word.possible_words.iter().map(|word| word.current_score()).max().unwrap_or(MAX_SCORE)).min() {
+    if let Some(maximum_invisible_score) = possible_visible_words.iter().map(|possible_words| possible_words.iter().map(|word| word.current_score()).max().unwrap_or(MAX_SCORE)).min() {
         possible_invisible_words.retain(|word| word.current_score() <= maximum_invisible_score);
     }
 
@@ -186,8 +166,8 @@ fn pick_next_guess_inner(guess_history: &[Word], visible_results: &[Vec<GuessRes
     let res =
         dict::wordles().into_par_iter().chain(dict::other_words().into_par_iter()).map(|guess| {
             let visible_score =
-                possible_visible_words.iter().map(|visible_word| {
-                    average_score(&visible_word.possible_words, guess)
+                possible_visible_words.iter().map(|possible_words| {
+                    average_score(possible_words, guess)
                 }).sum::<f64>();
             let invisible_score =
                 average_score(&possible_invisible_words, guess);
@@ -230,41 +210,40 @@ impl<'source> FromPyObject<'source> for GuessResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
 
     fn word(s: &str) -> Word {
         s.try_into().unwrap()
     }
 
-    fn concat_sort(vectors: &[&[Word]]) -> Vec<Word> {
-        let (first, others) = match vectors.split_first() {
-            Some((x, xs)) => (*x, xs),
-            None => return Vec::new(),
-        };
-        let mut res = first.to_vec();
-        others.into_iter().for_each(|&other| res.extend_from_slice(other));
-        res.sort_unstable();
-        res
-    }
-
-    lazy_static! {
-        static ref WORDLES: Vec<Word> = dict::wordles().collect();
-        static ref OTHER_WORDS: Vec<Word> = dict::wordles().collect();
-        static ref ALL_WORDS: Vec<Word> = concat_sort(&[WORDLES.as_slice(), OTHER_WORDS.as_slice()]);
-    }
-
-
-    fn wordles() -> impl Strategy<Value=Word> {
-        proptest::sample::select(WORDLES.as_slice())
-    }
-
-    fn all_words() -> impl Strategy<Value=Word> {
-        proptest::sample::select(ALL_WORDS.as_slice())
-    }
-
-    fn guess_history() -> impl Strategy<Value=GuessHistory> {
-        proptest::collection::vec(all_words(), 0..=40)
-    }
+    // fn concat_sort(vectors: &[&[Word]]) -> Vec<Word> {
+    //     let (first, others) = match vectors.split_first() {
+    //         Some((x, xs)) => (*x, xs),
+    //         None => return Vec::new(),
+    //     };
+    //     let mut res = first.to_vec();
+    //     others.into_iter().for_each(|&other| res.extend_from_slice(other));
+    //     res.sort_unstable();
+    //     res
+    // }
+    //
+    // lazy_static! {
+    //     static ref WORDLES: Vec<Word> = dict::wordles().collect();
+    //     static ref OTHER_WORDS: Vec<Word> = dict::wordles().collect();
+    //     static ref ALL_WORDS: Vec<Word> = concat_sort(&[WORDLES.as_slice(), OTHER_WORDS.as_slice()]);
+    // }
+    //
+    //
+    // fn wordles() -> impl Strategy<Value=Word> {
+    //     proptest::sample::select(WORDLES.as_slice())
+    // }
+    //
+    // fn all_words() -> impl Strategy<Value=Word> {
+    //     proptest::sample::select(ALL_WORDS.as_slice())
+    // }
+    //
+    // fn guess_history() -> impl Strategy<Value=Vec<Word>> {
+    //     proptest::collection::vec(all_words(), 0..=40)
+    // }
 
 
     #[test]

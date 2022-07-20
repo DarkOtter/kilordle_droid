@@ -1,6 +1,6 @@
 use std::env;
 use std::path::Path;
-use std::io::{BufRead, Read, Write};
+use std::io::{BufRead, Write};
 
 const WORD_LENGTH: usize = 5;
 
@@ -26,8 +26,8 @@ fn common_prefix_length<T: Eq>(left: &[T], right: &[T]) -> usize {
 
 fn write_words(dest_path: impl AsRef<Path>, words: &[[u8; WORD_LENGTH]]) -> std::io::Result<()> {
     let mut write_f = std::fs::File::create(dest_path)?;
-    const BLOCK_SIZE: usize = 64;
-    const WRITE_SIZE: usize = 4 * 1024;
+    const BLOCK_SIZE: usize = 256;
+    const WRITE_SIZE: usize = 64 * BLOCK_SIZE;
     let mut buf = Vec::with_capacity(WRITE_SIZE);
     let mut words = words.iter().cloned().peekable();
     loop {

@@ -3,7 +3,7 @@ use rayon::iter::plumbing::{Folder, UnindexedConsumer, UnindexedProducer};
 use rayon::prelude::ParallelIterator;
 use crate::word::{Word, WORD_LENGTH};
 
-const BLOCK_SIZE: usize = 64;
+const BLOCK_SIZE: usize = 256;
 
 const WORDLES: &'static [u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wordles.bin"));
 const OTHER_WORDS: &'static [u8] = include_bytes!(concat!(env!("OUT_DIR"), "/other_words.bin"));
@@ -37,7 +37,7 @@ impl<'a> DictIterator<'a> {
         if self.remaining_bytes_after_block.len() == 0 {
             None
         } else {
-            let (next_block, remaining_after_block) = unsafe {
+            let (next_block, remaining_after_block) = {
                 assert_eq!(self.remaining_bytes_after_block.len() % BLOCK_SIZE, 0, "Should only have a multiple of the block size");
                 debug_assert!(self.remaining_bytes_after_block.len() >= BLOCK_SIZE, "Should not be empty and be a multiple of the block size");
                 // TODO: Eventually this will be made unchecked once that's stable
@@ -128,10 +128,9 @@ pub fn other_words() -> DictIterator<'static> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::read;
     use super::*;
     use std::path::Path;
-    use std::io::{BufReader, BufRead};
+    use std::io::BufRead;
 
     fn read_words(from_path: impl AsRef<Path>) -> std::io::Result<Vec<[u8; WORD_LENGTH]>> {
         let read_f = std::fs::File::open(from_path)?;
