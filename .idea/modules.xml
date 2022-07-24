@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/kilordle_droid_rs.iml" filepath="$PROJECT_DIR$/.idea/kilordle_droid_rs.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/kilordle_droid.iml" filepath="$PROJECT_DIR$/.idea/kilordle_droid.iml" />
     </modules>
   </component>
 </project>
